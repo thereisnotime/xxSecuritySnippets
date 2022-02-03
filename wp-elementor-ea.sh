@@ -2,8 +2,8 @@
 # TODO: Test on Apache server
 # TODO: Add check for wp-cli
 _MIN_VERSION=506
-_SCRIPT_VERSION="1.1"
-_SCRIPT_NAME="WP-ELEMENTOR-EA-SCAN"
+_SCRIPT_VERSION="1.2"
+_SCRIPT_NAME="SCAN-WP-ELEMENTOR-EA"
 
 
 ###########################
