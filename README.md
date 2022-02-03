@@ -8,5 +8,5 @@ Collection of various security scanning and patching tools .
 
 Oneliner scan:
 ```bash
-bash <(curl -s https://raw.githubusercontent.com/thereisnotime/xxSecuritySnippets/master/wp-elementor-ea-nginx.sh)
+bash <(curl -s https://raw.githubusercontent.com/thereisnotime/xxSecuritySnippets/master/wp-elementor-ea.sh)
 ```
