@@ -2,7 +2,7 @@
 # TODO: Test on Apache server
 # TODO: Add check for wp-cli
 _MIN_VERSION=506
-_SCRIPT_VERSION="1.2"
+_SCRIPT_VERSION="1.3"
 _SCRIPT_NAME="SCAN-WP-ELEMENTOR-EA"
 
 
@@ -67,6 +67,11 @@ function check_root() {
     fi
 }
 function check_prerequisites() {
+    # check if wp-cli is installed
+    if ! command -v wp >/dev/null 2>&1; then
+        log "wp-cli is not installed. Please install wp-cli for $(hostname)" "ERR"
+        exit 1
+    fi
     multi_distro_install "curl"
     multi_distro_install "jq"
 }
@@ -74,7 +79,7 @@ function find_webserver() {
     local _webserver=""
     if command -v apache2 >/dev/null 2>&1; then
         _webserver="apache2"
-        scan_wp "/usr/local/lsws/conf/vhosts/" "DocumentRoot"
+        scan_wp "/etc/apache2/sites-enabled/" "DocumentRoot"
     fi
     if command -v /usr/local/lsws/bin/lshttpd -v >/dev/null 2>&1; then
         _webserver="openlitespeed"
@@ -89,12 +94,26 @@ function find_webserver() {
 function scan_wp() {
     _start_dir="$1"
     _root_dir="$2"
-    for file in $(find "$_start_dir" -type f); do
-        # echo  "=== Checking: $file"
-        _directory=$(grep -E "^\s*$_root_dir\s+" "$file" | sed -E "s/^\s*root\s+//g" | sed -E "s/;.*//g")
-        if [ -f "$_directory/wp-config.php" ]; then
-            # log "- Found wp-config.php in $_directory" "DEBUG"
-            cd "$_directory" || exit 1
+    _root_dirs=""
+    _root_dirs_existing=""
+    _configs=$(find "$_start_dir" -type f -exec grep -l "$_root_dir" {} \;)
+    # for each line in _configs
+    for _config in $_configs; do
+        _directory=$(cat "$_config" | grep -E "^\s*$_root_dir\s+" | sed -E "s/^\s*$_root_dir\s+//g" | sed -E "s/;.*//g" )
+        _directory=$(echo "$_directory" | sed -E "s/\/$//g")
+        _root_dirs="$_root_dirs $_directory"
+    done
+    # remove duplicates from _root_dirs
+    _root_dirs=$(echo "$_root_dirs" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+    # remove directories that are not existing directories from _root_dirs
+    for _dir in $_root_dirs; do
+        if [ -d "$_dir" ]; then
+            _root_dirs_existing="$_root_dirs_existing $_dir"
+        fi
+    done
+    for _dir in $_root_dirs_existing; do
+        if [ -f "$_dir/wp-config.php" ]; then
+            cd "$_dir" || exit 1
             _plugin=$(wp --allow-root plugin list --skip-themes --format=json 2>/dev/null | jq -r '.[] | "\(.name) \(.version)"' | grep essential-addons-for-elementor)
             if [ -n "$_plugin" ]; then
                 # log "- Found essential-addons-for-elementor in $_plugin" "DEBUG"
@@ -102,7 +121,7 @@ function scan_wp() {
                 _version=$(echo "$_version" | sed -E "s/\.//g")
                 if [ "$_version" -lt "$_MIN_VERSION" ]; then
                     _main_wp_site=$(wp --allow-root site list --skip-themes --format=json 2>/dev/null | jq -r '.[] | "\(.url) \(.name)"' | head -n 1  | awk '{print $1}')
-                    log "VULNERABLE | Host: $(hostname) | IP: $(curl --silent ip.rso.bg) | Dir: $_directory | essential-addons-for-elementor v$_version | URL: $_main_wp_site" "WARN"
+                    log "VULNERABLE | Host: $(hostname) | IP: $(curl --silent ip.rso.bg) | Dir: $_dir | essential-addons-for-elementor v$_version | URL: $_main_wp_site" "WARN"
                 fi  
             fi            
         fi
