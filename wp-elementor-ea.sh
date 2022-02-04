@@ -2,7 +2,7 @@
 # TODO: Test on Apache server
 # TODO: Add check for wp-cli
 _MIN_VERSION=506
-_SCRIPT_VERSION="1.3"
+_SCRIPT_VERSION="1.5"
 _SCRIPT_NAME="SCAN-WP-ELEMENTOR-EA"
 
 
@@ -79,23 +79,65 @@ function find_webserver() {
     local _webserver=""
     if command -v apache2 >/dev/null 2>&1; then
         _webserver="apache2"
-        scan_wp "/etc/apache2/sites-enabled/" "DocumentRoot"
+        scan_wp "/etc/apache2/sites-enabled/" "DocumentRoot" "$_webserver"
     fi
     if command -v /usr/local/lsws/bin/lshttpd -v >/dev/null 2>&1; then
         _webserver="openlitespeed"
-        scan_wp "/usr/local/lsws/conf/vhosts/" "docRoot"
+        scan_wp "/usr/local/lsws/conf/vhosts/" "docRoot" "$_webserver"
     fi
     if command -v nginx -v >/dev/null 2>&1; then
         _webserver="nginx"
-        scan_wp "/etc/nginx/sites-enabled/" "root"
+        scan_wp "/etc/nginx/sites-enabled/" "root" "$_webserver"
     fi
-
+    if command -v /usr/bin/whmapi1 -v >/dev/null 2>&1; then
+        _webserver="whm"
+        scan_whm 
+    fi
+}
+function scan_whm() {
+        _root_dirs=""
+        _root_dirs_existing=""
+        for _domain in $(cat /etc/localdomains); do
+            _dir=$(whmapi1 domainuserdata domain="$_domain" | grep documentroot | awk '{print $2}')
+            # check if directory exists
+            if [ -d "$_dir" ]; then
+                _root_dirs_existing="$_root_dirs_existing $_dir"
+            fi
+        done
+        _root_dirs_existing=$(echo "$_root_dirs_existing" | tr ' ' '\n' | sort -u)
+        _root_dirs_existing_length_after=$(echo "$_root_dirs_existing" | wc -w)
+        for _dir in $_root_dirs_existing; do
+            scan_dir "$_dir" "whm"
+        done
+}
+function scan_dir() {
+    local _dir="$1"
+    local _webserver="$2"
+    if [ -f "$_dir/wp-config.php" ]; then
+        cd "$_dir" || exit 1
+        _plugin=$(wp --allow-root plugin list --skip-themes --format=json 2>/dev/null | jq -r '.[] | "\(.name) \(.version)"' | grep essential-addons-for-elementor)
+        if [ -n "$_plugin" ]; then
+            # log "- Found essential-addons-for-elementor in $_plugin" "DEBUG"
+            _version=$(echo "$_plugin" | awk '{print $2}')
+            _version=$(echo "$_version" | sed -E "s/\.//g")
+            if [ "$_version" -lt "$_MIN_VERSION" ]; then
+                _main_wp_site=$(wp --allow-root site list --skip-themes --format=json 2>/dev/null | jq -r '.[] | "\(.url) \(.name)"' | head -n 1  | awk '{print $1}')
+                log "VULNERABLE | Host: $(hostname) | IP: $(curl --silent ip.rso.bg) | Dir: $_dir | essential-addons-for-elementor v$_version | URL: $_main_wp_site | Web: $_webserver" "WARN"
+            fi  
+        fi            
+    fi
 }
 function scan_wp() {
     _start_dir="$1"
     _root_dir="$2"
+    _webserver="$3"
     _root_dirs=""
     _root_dirs_existing=""
+    # check if directory exists
+    if ! [ -d "$_start_dir" ]; then
+        echo "Directory $_start_dir does not exist"
+        return 1
+    fi
     _configs=$(find "$_start_dir" -type f -exec grep -l "$_root_dir" {} \;)
     # for each line in _configs
     for _config in $_configs; do
@@ -112,19 +154,7 @@ function scan_wp() {
         fi
     done
     for _dir in $_root_dirs_existing; do
-        if [ -f "$_dir/wp-config.php" ]; then
-            cd "$_dir" || exit 1
-            _plugin=$(wp --allow-root plugin list --skip-themes --format=json 2>/dev/null | jq -r '.[] | "\(.name) \(.version)"' | grep essential-addons-for-elementor)
-            if [ -n "$_plugin" ]; then
-                # log "- Found essential-addons-for-elementor in $_plugin" "DEBUG"
-                _version=$(echo "$_plugin" | awk '{print $2}')
-                _version=$(echo "$_version" | sed -E "s/\.//g")
-                if [ "$_version" -lt "$_MIN_VERSION" ]; then
-                    _main_wp_site=$(wp --allow-root site list --skip-themes --format=json 2>/dev/null | jq -r '.[] | "\(.url) \(.name)"' | head -n 1  | awk '{print $1}')
-                    log "VULNERABLE | Host: $(hostname) | IP: $(curl --silent ip.rso.bg) | Dir: $_dir | essential-addons-for-elementor v$_version | URL: $_main_wp_site" "WARN"
-                fi  
-            fi            
-        fi
+        scan_dir "$_dir" "$_webserver"
     done
 }
 
